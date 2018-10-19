@@ -70,6 +70,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				msg, err = count.TopCount("all")
 			} else if len(args) <= 2 {
 				target := args[0]
+				log.Info("full message", m.Content)
 				if len(args) == 2 {
 					msg, err = count.SingleWordCount(target, args[1])
 				} else {
@@ -112,7 +113,7 @@ func createData(s *discordgo.Session) {
 				continue
 			}
 
-			log.Infof("name:%s id:%s", v.Name, v.ID)
+			log.Infof("name: %s, id: %s", v.Name, v.ID)
 
 			msgs := getMessagesFromChannel(s, *v)
 

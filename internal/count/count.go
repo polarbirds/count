@@ -1,12 +1,13 @@
 package count
 
 import (
-	"github.com/bwmarrin/discordgo"
-	"strings"
 	"errors"
 	"fmt"
-	"sort"
+	"github.com/bwmarrin/discordgo"
+	log "github.com/sirupsen/logrus"
 	"regexp"
+	"sort"
+	"strings"
 )
 
 type pair struct {
@@ -15,13 +16,13 @@ type pair struct {
 }
 
 var (
-	sanitizer *regexp.Regexp
+	sanitizer  *regexp.Regexp
 	urlPattern *regexp.Regexp
-	data      map[string]map[string]int
+	data       map[string]map[string]int
 )
 
 func init() {
-	sanitizer = regexp.MustCompile("[^a-z:`]")
+	sanitizer = regexp.MustCompile("[`\\[\\]{}()?'\",.&]")
 	urlPattern = regexp.MustCompile("https?://(www\\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}\\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)")
 	data = make(map[string]map[string]int)
 }
@@ -35,12 +36,12 @@ func BuildMessage(m *discordgo.Message) {
 
 func sanitizeMessage(text string) string {
 	text = strings.ToLower(text)
-
+	text = urlPattern.ReplaceAllString(text, " ")
 	return text
 }
 
 func sanitizeWord(word string) string {
-	word = strings.Trim(word, " ")
+	word = strings.ToLower(word)
 	word = sanitizer.ReplaceAllString(word, " ")
 	word = strings.Trim(word, " ")
 	return word
@@ -63,7 +64,7 @@ func Build(text string, username string, includeInAll bool) {
 func putWord(word string, username string, includeInAll bool) {
 	word = sanitizeWord(word)
 
-	if len(word) <= 0 {
+	if len(word) == 0 {
 		return
 	}
 
@@ -118,7 +119,7 @@ func TopCount(target string) (string, error) {
 	var words []string
 
 	for i, p := range sortedSet {
-		words = append(words, fmt.Sprintf("%d. %s: %d", i + 1, p.Key, p.Value))
+		words = append(words, fmt.Sprintf("%d. %s: %d", i+1, p.Key, p.Value))
 	}
 
 	return strings.Join(words, "\n"), nil
@@ -131,13 +132,21 @@ func SingleWordCount(target string, word string) (string, error) {
 
 	userData := data[target]
 
+	log.Info("word", word)
+
+	word = sanitizeWord(word)
+	log.Info("sanitized word ", word)
+	if len(word) == 0 {
+		return "", errors.New("word contains only sanitized chars")
+	}
+
 	if _, ok := userData[word]; !ok {
-		return fmt.Sprintf("user %q has never used that word", target), nil
+		return fmt.Sprintf("user %q has never said that", target), nil
 	}
 
 	if target == "all" {
 		target = "everyone"
 	}
 
-	return fmt.Sprintf("%s has used the word %q %d times", target, word, userData[word]), nil
+	return fmt.Sprintf("%s has said %s %d times", target, word, userData[word]), nil
 }
