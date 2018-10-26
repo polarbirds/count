@@ -3,12 +3,18 @@ package count
 import (
 	"errors"
 	"fmt"
-	"github.com/bwmarrin/discordgo"
-	log "github.com/sirupsen/logrus"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/bwmarrin/discordgo"
+	log "github.com/sirupsen/logrus"
 )
+
+type set struct {
+	includeAll bool
+	counts     map[string]int
+}
 
 type pair struct {
 	Key   string
@@ -18,13 +24,13 @@ type pair struct {
 var (
 	sanitizer  *regexp.Regexp
 	urlPattern *regexp.Regexp
-	data       map[string]map[string]int
+	data       map[string]set
 )
 
 func init() {
 	sanitizer = regexp.MustCompile("[`\\[\\]{}()?'\",.&]")
 	urlPattern = regexp.MustCompile("https?://(www\\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}\\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)")
-	data = make(map[string]map[string]int)
+	data = make(map[string]set)
 }
 
 func BuildMessage(m *discordgo.Message) {
@@ -68,28 +74,38 @@ func putWord(word string, username string, includeInAll bool) {
 		return
 	}
 
-	userData := getUserData(username)
-	singleUserPutWord(word, userData)
+	if !setExists(username) {
+		createSet(username, includeInAll)
+	}
+
+	singleUserPutWord(word, data[username])
 	if includeInAll {
-		singleUserPutWord(word, getUserData("all"))
+		if !setExists("all") {
+			createSet("all", false)
+		}
+		singleUserPutWord(word, data["all"])
 	}
 }
 
-func singleUserPutWord(word string, userData map[string]int) {
-	if _, ok := userData[word]; ok {
-		userData[word]++
+func singleUserPutWord(word string, userData set) {
+	if _, ok := userData.counts[word]; ok {
+		userData.counts[word]++
 	} else {
-		userData[word] = 1
+		userData.counts[word] = 1
 	}
 }
 
-func getUserData(username string) map[string]int {
-	if val, ok := data[username]; ok {
-		return val
+func createSet(name string, includeAll bool) {
+	dataSet := set{
+		counts:     make(map[string]int),
+		includeAll: includeAll,
 	}
-	userData := make(map[string]int)
-	data[username] = userData
-	return userData
+	data[name] = dataSet
+}
+
+func setExists(name string) bool {
+	_, ok := data[name]
+	return ok
 }
 
 func getSortedSet(set map[string]int) []pair {
@@ -105,15 +121,45 @@ func getSortedSet(set map[string]int) []pair {
 	return sortedSet
 }
 
-func TopCount(target string) (string, error) {
-	if _, ok := data[target]; !ok {
-		return "", errors.New(fmt.Sprintf("no such dataset %q", target))
+func wordRankedPerUser(word string) (string, error) {
+	log.Info("wordRankedPerUser called with word ", word)
+	rankSet := make(map[string]int)
+	for setName, set := range data {
+		if set.includeAll {
+			if c, ok := set.counts[word]; ok {
+				rankSet[setName] = c
+			}
+		}
 	}
 
-	sortedSet := getSortedSet(data[target])
+	sortedSet := getSortedSet(rankSet)
 
-	if len(sortedSet) > 10 {
-		sortedSet = sortedSet[:10]
+	if len(sortedSet) > 5 {
+		sortedSet = sortedSet[:5]
+	}
+
+	var userWordCounts []string
+	for i, p := range sortedSet {
+		userWordCounts = append(userWordCounts, fmt.Sprintf("%d. %s: %d", i+1, p.Key, p.Value))
+	}
+
+	if len(userWordCounts) == 0 {
+		return "", fmt.Errorf("no one has said %s", word)
+	}
+
+	return strings.Join(userWordCounts, "\n"), nil
+}
+
+// TopCount returns the top words for a user
+func TopCount(target string) (string, error) {
+	if !setExists(target) {
+		return wordRankedPerUser(target)
+	}
+
+	sortedSet := getSortedSet(data[target].counts)
+
+	if len(sortedSet) > 5 {
+		sortedSet = sortedSet[:5]
 	}
 
 	var words []string
@@ -122,12 +168,17 @@ func TopCount(target string) (string, error) {
 		words = append(words, fmt.Sprintf("%d. %s: %d", i+1, p.Key, p.Value))
 	}
 
+	if len(words) == 0 {
+		return "", fmt.Errorf("target %s has no words", target)
+	}
+
 	return strings.Join(words, "\n"), nil
 }
 
+// SingleWordCount returns the count of a word from a target dataset
 func SingleWordCount(target string, word string) (string, error) {
 	if _, ok := data[target]; !ok {
-		return "", errors.New(fmt.Sprintf("no such dataset %q", target))
+		return "", fmt.Errorf("no such dataset %q", target)
 	}
 
 	userData := data[target]
@@ -140,7 +191,7 @@ func SingleWordCount(target string, word string) (string, error) {
 		return "", errors.New("word contains only sanitized chars")
 	}
 
-	if _, ok := userData[word]; !ok {
+	if _, ok := userData.counts[word]; !ok {
 		return fmt.Sprintf("user %q has never said that", target), nil
 	}
 
@@ -148,5 +199,5 @@ func SingleWordCount(target string, word string) (string, error) {
 		target = "everyone"
 	}
 
-	return fmt.Sprintf("%s has said %s %d times", target, word, userData[word]), nil
+	return fmt.Sprintf("%s has said %s %d times", target, word, userData.counts[word]), nil
 }

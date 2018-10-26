@@ -1,19 +1,20 @@
 package main
 
 import (
+	"errors"
 	"flag"
+	"io/ioutil"
+	"net/http"
+	"os"
+	"os/signal"
+	"regexp"
+	"strings"
+	"syscall"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/polarbirds/count/internal/count"
 	"github.com/polarbirds/jako/pkg/command"
 	log "github.com/sirupsen/logrus"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-	"net/http"
-	"io/ioutil"
-	"regexp"
-	"errors"
 )
 
 var (
@@ -70,7 +71,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				msg, err = count.TopCount("all")
 			} else if len(args) <= 2 {
 				target := args[0]
-				log.Info("full message", m.Content)
+				log.Info("full message: ", m.Content)
 				if len(args) == 2 {
 					msg, err = count.SingleWordCount(target, args[1])
 				} else {
