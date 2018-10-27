@@ -5,11 +5,8 @@ import (
 	"flag"
 	"io/ioutil"
 	"net/http"
-	"os"
-	"os/signal"
 	"regexp"
 	"strings"
-	"syscall"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/polarbirds/count/internal/count"
@@ -44,12 +41,12 @@ func main() {
 
 	createData(dg)
 
-	log.Info("Bot is now running.  Press CTRL-C to exit.")
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-	<-sc
+	// log.Info("Bot is now running.  Press CTRL-C to exit.")
+	// sc := make(chan os.Signal, 1)
+	// signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
+	// <-sc
 
-	dg.Close()
+	// dg.Close()
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -116,7 +113,7 @@ func createData(s *discordgo.Session) {
 
 			log.Infof("name: %s, id: %s", v.Name, v.ID)
 
-			msgs := getMessagesFromChannel(s, *v)
+			msgs := getMessagesFromChannel(s, v)
 
 			for _, m := range msgs {
 				count.BuildMessage(m)
@@ -130,7 +127,22 @@ func createData(s *discordgo.Session) {
 	s.UpdateStatus(0, "Finished building data")
 }
 
-func getMessagesFromChannel(s *discordgo.Session, channel discordgo.Channel) []*discordgo.Message {
+func fetchChannel(channel *discordgo.Channel, s *discordgo.Session) {
+	if channel.Type != discordgo.ChannelTypeGuildText {
+		return
+	}
+
+	log.Infof("name: %s, id: %s", channel.Name, channel.ID)
+
+	msgs := getMessagesFromChannel(s, channel)
+
+	for _, m := range msgs {
+		count.BuildMessage(m)
+	}
+	log.Infof("%d messages fetched", len(msgs))
+}
+
+func getMessagesFromChannel(s *discordgo.Session, channel *discordgo.Channel) []*discordgo.Message {
 	beforeID := channel.LastMessageID
 	var msgs []*discordgo.Message
 	var failedAttempts = 0
