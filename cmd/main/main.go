@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
@@ -27,7 +28,6 @@ func init() {
 }
 
 func main() {
-	log.Info(Token)
 	dg, err := discordgo.New("Bot " + Token)
 	if err != nil {
 		log.Error("error creating Discord session,", err)
@@ -42,7 +42,8 @@ func main() {
 		return
 	}
 
-	createData(dg)
+	// createData(dg)
+	createDataAsync(dg)
 
 	log.Info("Bot is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
@@ -71,7 +72,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				msg, err = count.TopCount("all")
 			} else if len(args) <= 2 {
 				target := args[0]
-				log.Info("full message: ", m.Content)
 				if len(args) == 2 {
 					msg, err = count.SingleWordCount(target, args[1])
 				} else {
@@ -98,39 +98,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 }
 
-func createData(s *discordgo.Session) {
-	s.UpdateStatus(0, "Building data...")
-	for _, guild := range s.State.Guilds {
-		log.Infof("Parsing guild %s: %s", guild.Name, guild.ID)
-
-		channels, err := s.GuildChannels(guild.ID)
-		if err != nil {
-			log.Fatal(err)
-			return
-		}
-
-		for _, v := range channels {
-			if v.Type != discordgo.ChannelTypeGuildText {
-				continue
-			}
-
-			log.Infof("name: %s, id: %s", v.Name, v.ID)
-
-			msgs := getMessagesFromChannel(s, *v)
-
-			for _, m := range msgs {
-				count.BuildMessage(m)
-			}
-			log.Infof("%d messages fetched", len(msgs))
-		}
-	}
-
-	buildTrump()
-
-	s.UpdateStatus(0, "Finished building data")
-}
-
-func getMessagesFromChannel(s *discordgo.Session, channel discordgo.Channel) []*discordgo.Message {
+func getMessagesFromChannel(s *discordgo.Session, channel *discordgo.Channel) []*discordgo.Message {
 	beforeID := channel.LastMessageID
 	var msgs []*discordgo.Message
 	var failedAttempts = 0
@@ -152,19 +120,72 @@ func getMessagesFromChannel(s *discordgo.Session, channel discordgo.Channel) []*
 		}
 
 		msgs = append(msgs, m...)
+		log.Infof("fetched %d messages so far on channel %s", len(msgs), channel.Name)
 		beforeID = m[len(m)-1].ID
 		failedAttempts = 0
 	}
 	return msgs
 }
 
-func buildTrump() {
+func createDataAsync(s *discordgo.Session) {
+	s.UpdateStatus(0, "Building data...")
+	for _, guild := range s.State.Guilds {
+		log.Infof("Parsing guild %s: %s", guild.Name, guild.ID)
+
+		channels, err := s.GuildChannels(guild.ID)
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+
+		ch := make(chan []*discordgo.Message)
+		var wg sync.WaitGroup
+
+		wg.Add(len(channels) + 1)
+
+		// build all channels async
+		for _, v := range channels {
+			if v.Type != discordgo.ChannelTypeGuildText {
+				wg.Done()
+				continue
+			}
+
+			log.Infof("name: %s, id: %s", v.Name, v.ID)
+			go func(dChan *discordgo.Channel, c chan<- []*discordgo.Message, w *sync.WaitGroup) {
+				c <- getMessagesFromChannel(s, dChan)
+				w.Done()
+			}(v, ch, &wg)
+		}
+
+		// build trump async
+		go func(c chan<- []*discordgo.Message, w *sync.WaitGroup) {
+			c <- getTrumpAsDiscordMsgs()
+			w.Done()
+		}(ch, &wg)
+
+		go func() {
+			wg.Wait()
+			close(ch)
+		}()
+
+		for m := range ch {
+			for _, msg := range m {
+				count.BuildMessage(msg)
+			}
+		}
+		log.Info("data-parsing done")
+	}
+
+	s.UpdateStatus(0, "Finished building data")
+}
+
+func getTrumpAsDiscordMsgs() []*discordgo.Message {
 	log.Info("Building trump")
 
 	resp, err := http.Get("https://raw.githubusercontent.com/ryanmcdermott/trump-speeches/master/speeches.txt")
 	if err != nil {
 		log.Error(err)
-		return
+		return nil
 	}
 
 	b, err := ioutil.ReadAll(resp.Body)
@@ -174,19 +195,28 @@ func buildTrump() {
 	pattern, err := regexp.Compile("^SPEECH \\d+")
 	if err != nil {
 		log.Error(err)
-		return
+		return nil
+	}
+
+	msgs := []*discordgo.Message{}
+
+	author := discordgo.User{
+		Username: "trump",
+		Bot:      true,
 	}
 
 	for _, line := range lines {
 		if len(line) == 0 || pattern.MatchString(line) {
 			continue
 		}
-		count.Build(line, "trump", false)
+
+		msg := discordgo.Message{
+			Content: line,
+			Author:  &author,
+		}
+		msgs = append(msgs, &msg)
 	}
 	log.Info("Trump built")
-}
 
-func getHelp() string {
-	return "!mimic mimics a user\nusage: !mimic <username> [starter word]\n" +
-		"!words gets statistics for the markov _tree_ globally or for a user\nusage: !words [username]"
+	return msgs // this is death. discordgo is pointer spaghetti
 }

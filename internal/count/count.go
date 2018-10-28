@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
-	log "github.com/sirupsen/logrus"
 )
 
 type set struct {
@@ -122,7 +121,6 @@ func getSortedSet(set map[string]int) []pair {
 }
 
 func wordRankedPerUser(word string) (string, error) {
-	log.Info("wordRankedPerUser called with word ", word)
 	rankSet := make(map[string]int)
 	for setName, set := range data {
 		if set.includeAll {
@@ -183,10 +181,8 @@ func SingleWordCount(target string, word string) (string, error) {
 
 	userData := data[target]
 
-	log.Info("word", word)
-
 	word = sanitizeWord(word)
-	log.Info("sanitized word ", word)
+
 	if len(word) == 0 {
 		return "", errors.New("word contains only sanitized chars")
 	}
