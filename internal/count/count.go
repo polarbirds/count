@@ -21,14 +21,16 @@ type pair struct {
 }
 
 var (
-	sanitizer  *regexp.Regexp
-	urlPattern *regexp.Regexp
-	data       map[string]set
+	sanitizer    *regexp.Regexp
+	urlPattern   *regexp.Regexp
+	emojiPattern *regexp.Regexp
+	data         map[string]set
 )
 
 func init() {
 	sanitizer = regexp.MustCompile("[`\\[\\]{}()?'\",.&]")
 	urlPattern = regexp.MustCompile("https?://(www\\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}\\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)")
+	emojiPattern = regexp.MustCompile("^<:[a-zA-Z_\\-1-9\\.,\\+]+:\\d+>$")
 	data = make(map[string]set)
 }
 
@@ -107,13 +109,16 @@ func setExists(name string) bool {
 	return ok
 }
 
-func getSortedSet(set map[string]int) []pair {
+func getSortedSet(set map[string]int, reverse bool) []pair {
 	var sortedSet []pair
 	for k, v := range set {
 		sortedSet = append(sortedSet, pair{k, v})
 	}
 
 	sort.Slice(sortedSet, func(i, j int) bool {
+		if reverse {
+			return sortedSet[i].Value < sortedSet[j].Value
+		}
 		return sortedSet[i].Value > sortedSet[j].Value
 	})
 
@@ -130,7 +135,7 @@ func wordRankedPerUser(word string) (string, error) {
 		}
 	}
 
-	sortedSet := getSortedSet(rankSet)
+	sortedSet := getSortedSet(rankSet, false)
 
 	if len(sortedSet) > 5 {
 		sortedSet = sortedSet[:5]
@@ -154,7 +159,7 @@ func TopCount(target string) (string, error) {
 		return wordRankedPerUser(target)
 	}
 
-	sortedSet := getSortedSet(data[target].counts)
+	sortedSet := getSortedSet(data[target].counts, false)
 
 	if len(sortedSet) > 5 {
 		sortedSet = sortedSet[:5]
@@ -196,4 +201,71 @@ func SingleWordCount(target string, word string) (string, error) {
 	}
 
 	return fmt.Sprintf("%s has said %s %d times", target, word, userData.counts[word]), nil
+}
+
+func EmojiTop(s *discordgo.Session, m *discordgo.MessageCreate, invert bool, showCount int) (string, error) {
+	c, err := s.Channel(m.ChannelID)
+	if err != nil {
+		return "", err
+	}
+
+	g, err := s.Guild(c.GuildID)
+	if err != nil {
+		return "", err
+	}
+
+	guildEmojis := g.Emojis
+
+	emojiScores := make(map[string]int)
+
+	for _, s := range data {
+		if !s.includeAll { // skip non-user sets
+			continue
+		}
+
+		for word, count := range s.counts {
+			if !emojiPattern.Match([]byte(word)) {
+				continue
+			}
+			if !validEmoji(guildEmojis, word) {
+				continue
+			}
+
+			prevScore, ok := emojiScores[word]
+			if ok {
+				emojiScores[word] = prevScore + count
+			} else {
+				emojiScores[word] = count
+			}
+		}
+	}
+
+	sortedSet := getSortedSet(emojiScores, invert)
+	if len(sortedSet) > showCount {
+		sortedSet = sortedSet[:showCount]
+	}
+
+	var emojiRanks []string
+	for i, p := range sortedSet {
+		emojiRanks = append(emojiRanks, fmt.Sprintf("%d. %s: %d", i+1, p.Key, p.Value))
+	}
+
+	return strings.Join(emojiRanks, "\n"), nil
+}
+
+func validEmoji(guildEmojis []*discordgo.Emoji, word string) bool {
+	for _, e := range guildEmojis {
+		idIndex := strings.Index(word, e.ID)
+		if idIndex == -1 {
+			continue
+		}
+		nameIndex := strings.Index(word, e.Name)
+		if nameIndex == -1 {
+			continue
+		}
+		if nameIndex < idIndex {
+			return true
+		}
+	}
+	return false
 }

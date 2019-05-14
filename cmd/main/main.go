@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -81,6 +82,33 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				err = errors.New("1 or 2 args plz")
 			}
 
+			if err != nil {
+				log.Error(err)
+				s.UpdateStatus(0, err.Error())
+				break
+			}
+
+			_, discErr = s.ChannelMessageSend(m.ChannelID, msg)
+
+		case "emojis":
+			invert := false
+			showCount := 5
+
+			for _, arg := range args {
+				if arg == "reverse" || arg == "bottom" {
+					invert = true
+					continue
+				}
+
+				i, err := strconv.Atoi(arg)
+				if err != nil {
+					continue
+				} else if i > 0 && showCount <= 20 {
+					showCount = i
+				}
+			}
+
+			msg, err := count.EmojiTop(s, m, invert, showCount)
 			if err != nil {
 				log.Error(err)
 				s.UpdateStatus(0, err.Error())
