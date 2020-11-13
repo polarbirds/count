@@ -195,9 +195,9 @@ func SingleWordCount(target string, word string) (string, error) {
 		}
 		for w := range userData {
 			matched, err := re.Match([]byte(w))
-			if (err != nil {
+			if err != nil {
 				return fmt.Sprintf("Matching failed for regex %s", reStr), err
-			})
+			}
 			if matched {
 				wordCount++
 			}
