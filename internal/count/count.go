@@ -191,10 +191,14 @@ func SingleWordCount(target string, word string) (string, error) {
 		reStr := strings.split(word, "regexp=")[1]
 		re, err := regex.Compile(reStr)
 		if err != nil {
-			return fmt.Sprintf("%s is not a valid regexp", reStr), nil
+			return fmt.Sprintf("%s is not a valid pattern", reStr), err
 		}
 		for w := range userData {
-			if re.Match(w) {
+			matched, err := re.Match([]byte(w))
+			if (err != nil {
+				return fmt.Sprintf("Matching failed for regex %s", reStr), err
+			})
+			if matched {
 				wordCount++
 			}
 		}
