@@ -186,13 +186,33 @@ func SingleWordCount(target string, word string) (string, error) {
 
 	userData := data[target]
 
-	word = sanitizeWord(word)
+	wordCount := 0
+	if strings.HasPrefix(word, "regexp=") {
+		reStr := strings.split(word, "regexp=")[1]
+		re, err := regex.Compile(reStr)
+		if err != nil {
+			return fmt.Sprintf("%s is not a valid pattern", reStr), err
+		}
+		for w := range userData {
+			matched, err := re.Match([]byte(w))
+			if err != nil {
+				return fmt.Sprintf("Matching failed for regex %s", reStr), err
+			}
+			if matched {
+				wordCount++
+			}
+		}
+	} else {
+		word = sanitizeWord(word)
 
-	if len(word) == 0 {
-		return "", errors.New("word contains only sanitized chars")
+		if len(word) == 0 {
+			return "", errors.New("word contains only sanitized chars")
+		}
+
+		wordCount = userData.counts[word]
 	}
 
-	if _, ok := userData.counts[word]; !ok {
+	if _, ok := wordCount; !ok {
 		return fmt.Sprintf("user %q has never said that", target), nil
 	}
 
